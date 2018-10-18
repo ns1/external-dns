@@ -1187,3 +1187,19 @@
   ]
   solver-name = "gps-cdcl"
   solver-version = 1
+
+[[projects]]
+  branch = "v2"
+  digest = "1:03abc1d6b74b5ae044ed1f951443cce14e4813caa20eccfbb2a4b4a39f8eaafc"
+  name = "gopkg.in/ns1/ns1-go.v2"
+  packages = [
+    ".",
+    "rest",
+    "rest/model/account",
+    "rest/model/data",
+    "rest/model/dns",
+    "rest/model/filter",
+    "rest/model/monitor",
+  ]
+  pruneopts = ""
+  revision = "028658c6d9be774b6d103a923d8c4b2715135c3f"

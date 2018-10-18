@@ -119,3 +119,7 @@ ignored = ["github.com/kubernetes/repo-infra/kazel"]
 [[constraint]]
   name = "github.com/miekg/dns"
   version = "1.0.8"
+
+[[constraint]]
+  name = "gopkg.in/ns1/ns1-go.v2"
+  branch = "v2"
