@@ -28,9 +28,9 @@ ExternalDNS can solve this for you as well.
 
 ### Which DNS providers are supported?
 
-Currently, the following providers are supported: 
+Currently, the following providers are supported:
 
-- Google CloudDNS
+- Google Cloud DNS
 - AWS Route 53
 - AzureDNS
 - CloudFlare
@@ -40,6 +40,11 @@ Currently, the following providers are supported:
 - Dyn
 - OpenStack Designate
 - PowerDNS
+- CoreDNS
+- Exoscale
+- Oracle Cloud Infrastructure DNS
+- Linode DNS
+- RFC2136
 
 As stated in the README, we are currently looking for stable maintainers for those providers, to ensure that bugfixes and new features will be available for all of those.
 
@@ -69,6 +74,7 @@ Regarding Ingress, we'll support:
 * Google's Ingress Controller on GKE that integrates with their Layer 7 load balancers (GLBC)
 * nginx-ingress-controller v0.9.x with a fronting Service
 * Zalando's [AWS Ingress controller](https://github.com/zalando-incubator/kube-ingress-aws-controller), based on AWS ALBs and [Skipper](https://github.com/zalando/skipper)
+* [Traefik](https://github.com/containous/traefik) 1.7 and above, when [`kubernetes.ingressEndpoint`](https://docs.traefik.io/v1.7/configuration/backends/kubernetes/#ingressendpoint) is configured (`kubernetes.ingressEndpoint.useDefaultPublishedService` in the [Helm chart](https://github.com/helm/charts/tree/master/stable/traefik#configuration))
 
 ### Are other Ingress Controllers supported?
 
@@ -154,6 +160,18 @@ CNAMEs cannot co-exist with other records, therefore you can use the `--txt-pref
 
 You need to add either https://www.googleapis.com/auth/ndev.clouddns.readwrite or https://www.googleapis.com/auth/cloud-platform on your instance group's scope.
 
+### What metrics can I get from ExternalDNS and what do they mean?  
+
+ExternalDNS exposes 2 types of metrics: Sources and Registry errors.
+
+`Source`s are mostly Kubernetes API objects. Examples of `source` errors may be connection errors to the Kubernetes API server itself or missing RBAC permissions. It can also stem from incompatible configuration in the objects itself like invalid characters, processing a broken fqdnTemplate, etc.
+
+`Registry` errors are mostly Provider errors, unless there's some coding flaw in the registry package. Provider errors often arise due to accessing their APIs due to network or missing cloud-provider permissions when reading records. When applying a changeset, errors will arise if the changeset applied is incompatible with the current state.  
+
+In case of an increased error count, you could correlate them with the `http_request_duration_seconds{handler="instrumented_http"}` metric which should show increased numbers for status codes 4xx (permissions, configuration, invalid changeset) or 5xx (apiserver down).
+
+You can use the host label in the metric to figure out if the request was against the Kubernetes API server (Source errors) or the DNS provider API (Registry/Provider errors).
+
 ### How can I run ExternalDNS under a specific GCP Service Account, e.g. to access DNS records in other projects?
 
 Have a look at https://github.com/linki/mate/blob/v0.6.2/examples/google/README.md#permissions
@@ -225,3 +243,11 @@ To do this with ExternalDNS you can use the `--annotation-filter` to specificall
 an instance of a ingress controller. Let's assume you have two ingress controllers `nginx-internal` and `nginx-external`
 then you can start two ExternalDNS providers one with `--annotation-filter=kubernetes.io/ingress.class=nginx-internal`
 and one with `--annotation-filter=kubernetes.io/ingress.class=nginx-external`.
+
+### Can external-dns manage(add/remove) records in a hosted zone which is setup in different AWS account?
+
+Yes, give it the correct cross-account/assume-role permissions and use the `--aws-assume-role` flag https://github.com/kubernetes-incubator/external-dns/pull/524#issue-181256561
+
+### How do I provide multiple values to the annotation `external-dns.alpha.kubernetes.io/hostname`?
+
+Separate them by `,`.

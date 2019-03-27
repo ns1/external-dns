@@ -42,6 +42,7 @@ const (
 	defaultAlibabaCloudPrivateZoneRecordTTL = 60
 	defaultAlibabaCloudPageSize             = 50
 	nullHostAlibabaCloud                    = "@"
+	pVTZDoamin                              = "pvtz.aliyuncs.com"
 )
 
 // AlibabaCloudDNSAPI is a minimal implementation of DNS API that we actually use, used primarily for unit testing.
@@ -684,24 +685,31 @@ func (p *AlibabaCloudProvider) splitDNSName(endpoint *endpoint.Endpoint) (rr str
 	}
 
 	if !found {
-		idx := strings.Index(name, ".")
-		if idx >= 0 {
-			rr = name[0:idx]
-			domain = name[idx+1:]
-		} else {
+		parts := strings.Split(name, ".")
+		if len(parts) < 2 {
 			rr = name
 			domain = ""
+		} else {
+			domain = parts[len(parts)-2] + "." + parts[len(parts)-1]
+			rrIndex := strings.Index(name, domain)
+			if rrIndex < 1 {
+				rrIndex = 1
+			}
+			rr = name[0 : rrIndex-1]
 		}
 	}
+
 	if rr == "" {
 		rr = nullHostAlibabaCloud
 	}
+
 	return rr, domain
 }
 
 func (p *AlibabaCloudProvider) matchVPC(zoneID string) bool {
 	request := pvtz.CreateDescribeZoneInfoRequest()
 	request.ZoneId = zoneID
+	request.Domain = pVTZDoamin
 	response, err := p.getPvtzClient().DescribeZoneInfo(request)
 	if err != nil {
 		log.Errorf("Failed to describe zone info %s in Alibaba Cloud DNS: %v", zoneID, err)
@@ -724,7 +732,7 @@ func (p *AlibabaCloudProvider) privateZones() ([]pvtz.Zone, error) {
 	request := pvtz.CreateDescribeZonesRequest()
 	request.PageSize = requests.NewInteger(defaultAlibabaCloudPageSize)
 	request.PageNumber = "1"
-
+	request.Domain = pVTZDoamin
 	for {
 		response, err := p.getPvtzClient().DescribeZones(request)
 		if err != nil {
@@ -732,7 +740,7 @@ func (p *AlibabaCloudProvider) privateZones() ([]pvtz.Zone, error) {
 			return nil, err
 		}
 		for _, zone := range response.Zones.Zone {
-			log.Debugf("Zone: %++v", zone)
+			log.Infof("PrivateZones zone: %++v", zone)
 
 			if !p.zoneIDFilter.Match(zone.ZoneId) {
 				continue
@@ -778,6 +786,7 @@ func (p *AlibabaCloudProvider) getPrivateZones() (map[string]*alibabaPrivateZone
 		request.ZoneId = zone.ZoneId
 		request.PageSize = requests.NewInteger(defaultAlibabaCloudPageSize)
 		request.PageNumber = "1"
+		request.Domain = pVTZDoamin
 		var records []pvtz.Record
 
 		for {
@@ -878,6 +887,7 @@ func (p *AlibabaCloudProvider) createPrivateZoneRecord(zones map[string]*alibaba
 	request.ZoneId = zone.ZoneId
 	request.Type = endpoint.RecordType
 	request.Rr = rr
+	request.Domain = pVTZDoamin
 
 	ttl := int(endpoint.RecordTTL)
 	if ttl != 0 {
@@ -921,6 +931,7 @@ func (p *AlibabaCloudProvider) deletePrivateZoneRecord(recordID int) error {
 
 	request := pvtz.CreateDeleteZoneRecordRequest()
 	request.RecordId = requests.NewInteger(recordID)
+	request.Domain = pVTZDoamin
 
 	response, err := p.getPvtzClient().DeleteZoneRecord(request)
 	if err == nil {
@@ -992,6 +1003,7 @@ func (p *AlibabaCloudProvider) updatePrivateZoneRecord(record pvtz.Record, endpo
 	request.Rr = record.Rr
 	request.Type = record.Type
 	request.Value = record.Value
+	request.Domain = pVTZDoamin
 	ttl := int(endpoint.RecordTTL)
 	if ttl != 0 {
 		request.Ttl = requests.NewInteger(ttl)

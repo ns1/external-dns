@@ -17,6 +17,7 @@ limitations under the License.
 package plan
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/kubernetes-incubator/external-dns/endpoint"
@@ -78,8 +79,12 @@ type planTableRow struct {
 	candidates []*endpoint.Endpoint
 }
 
+func (t planTableRow) String() string {
+	return fmt.Sprintf("planTableRow{current=%v, candidates=%v}", t.current, t.candidates)
+}
+
 func (t planTable) addCurrent(e *endpoint.Endpoint) {
-	dnsName := sanitizeDNSName(e.DNSName)
+	dnsName := normalizeDNSName(e.DNSName)
 	if _, ok := t.rows[dnsName]; !ok {
 		t.rows[dnsName] = &planTableRow{}
 	}
@@ -87,7 +92,7 @@ func (t planTable) addCurrent(e *endpoint.Endpoint) {
 }
 
 func (t planTable) addCandidate(e *endpoint.Endpoint) {
-	dnsName := sanitizeDNSName(e.DNSName)
+	dnsName := normalizeDNSName(e.DNSName)
 	if _, ok := t.rows[dnsName]; !ok {
 		t.rows[dnsName] = &planTableRow{}
 	}
@@ -100,7 +105,7 @@ func (t planTable) getUpdates() (updateNew []*endpoint.Endpoint, updateOld []*en
 		if row.current != nil && len(row.candidates) > 0 { //dns name is taken
 			update := t.resolver.ResolveUpdate(row.current, row.candidates)
 			// compare "update" to "current" to figure out if actual update is required
-			if shouldUpdateTTL(update, row.current) || targetChanged(update, row.current) {
+			if shouldUpdateTTL(update, row.current) || targetChanged(update, row.current) || shouldUpdateProviderSpecific(update, row.current) {
 				inheritOwner(row.current, update)
 				updateNew = append(updateNew, update)
 				updateOld = append(updateOld, row.current)
@@ -135,10 +140,10 @@ func (t planTable) getDeletes() (deleteList []*endpoint.Endpoint) {
 func (p *Plan) Calculate() *Plan {
 	t := newPlanTable()
 
-	for _, current := range p.Current {
+	for _, current := range filterRecordsForPlan(p.Current) {
 		t.addCurrent(current)
 	}
-	for _, desired := range p.Desired {
+	for _, desired := range filterRecordsForPlan(p.Desired) {
 		t.addCandidate(desired)
 	}
 
@@ -180,8 +185,57 @@ func shouldUpdateTTL(desired, current *endpoint.Endpoint) bool {
 	return desired.RecordTTL != current.RecordTTL
 }
 
-// sanitizeDNSName checks if the DNS name is correct
-// for now it only removes space and lower case
-func sanitizeDNSName(dnsName string) string {
-	return strings.TrimSpace(strings.ToLower(dnsName))
+func shouldUpdateProviderSpecific(desired, current *endpoint.Endpoint) bool {
+	if current.ProviderSpecific == nil && len(desired.ProviderSpecific) == 0 {
+		return false
+	}
+	for _, c := range current.ProviderSpecific {
+		// don't consider target health when detecting changes
+		// see: https://github.com/kubernetes-incubator/external-dns/issues/869#issuecomment-458576954
+		if c.Name == "aws/evaluate-target-health" {
+			continue
+		}
+
+		for _, d := range desired.ProviderSpecific {
+			if d.Name == c.Name && d.Value != c.Value {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// filterRecordsForPlan removes records that are not relevant to the planner.
+// Currently this just removes TXT records to prevent them from being
+// deleted erroneously by the planner (only the TXT registry should do this.)
+//
+// Per RFC 1034, CNAME records conflict with all other records - it is the
+// only record with this property. The behavior of the planner may need to be
+// made more sophisticated to codify this.
+func filterRecordsForPlan(records []*endpoint.Endpoint) []*endpoint.Endpoint {
+	filtered := []*endpoint.Endpoint{}
+
+	for _, record := range records {
+		// Explicitly specify which records we want to use for planning.
+		// TODO: Add AAAA records as well when they are supported.
+		switch record.RecordType {
+		case endpoint.RecordTypeA, endpoint.RecordTypeCNAME:
+			filtered = append(filtered, record)
+		default:
+			continue
+		}
+	}
+
+	return filtered
+}
+
+// normalizeDNSName converts a DNS name to a canonical form, so that we can use string equality
+// it: removes space, converts to lower case, ensures there is a trailing dot
+func normalizeDNSName(dnsName string) string {
+	s := strings.TrimSpace(strings.ToLower(dnsName))
+	if !strings.HasSuffix(s, ".") {
+		s += "."
+	}
+	return s
 }
